@@ -82,6 +82,16 @@ opf train /path/to/train.jsonl --output-dir /path/to/finetuned_checkpoint
 
 Consult `opf train --help` for more flags and information about the finetuning mode.
 
+### Local Frontend Demo
+
+You can also run a dependency-free local browser demo for quick model testing:
+
+```bash
+python3 examples/demo_frontend.py
+```
+
+Then open `http://127.0.0.1:7860`. The demo includes a free-text input, bundled synthetic example inputs, `cpu`/`cuda` device selection, `typed`/`redacted` output modes, and `typed`/`untyped` eval-mode guidance. Install the package first with `pip install -e .` if you have not already done so.
+
 ### Structure
 
 - `opf/__main__.py`: unified CLI entrypoint for redact, eval, and train modes.
