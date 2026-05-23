@@ -20,7 +20,16 @@ Repository resources: [License](LICENSE) and [Security Policy](SECURITY.md).
 
 ### How To Use
 
-1. Install the package locally:
+1. Create and activate a Python virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+If the virtual environment already exists, activate it with `source .venv/bin/activate`. To leave the virtual environment, run `deactivate`.
+
+2. Install the package locally:
 
 ```bash
 pip install -e .
@@ -28,7 +37,7 @@ pip install -e .
 
 After this, you will have a python script `opf` that can be run directly or via `python -m opf`. The script can be used in 3 separate ways, as described below.
 
-2. Run one-shot redaction:
+3. Run one-shot redaction:
 
 By default, `opf` looks for a model at the directory pointed to by the `OPF_CHECKPOINT` variable, or `~/.opf/privacy_filter`. If a model is not found in the `~/.opf/privacy_filter` location, it will be downloaded.
 
@@ -64,7 +73,7 @@ If no input is provided, `opf` will start in interactive mode. In this mode, for
 
 Consult `opf redact --help` for more flags and information about the redaction mode.
 
-3. Run eval on a labeled dataset:
+4. Run eval on a labeled dataset:
 
 ```bash
 opf eval examples/data/sample_eval_five_examples.jsonl
@@ -74,7 +83,7 @@ The sample eval fixtures under `examples/data/sample_eval_five_examples*.jsonl` 
 
 Consult `opf eval --help` for more flags and information about the evaluation mode.
 
-4. Finetune on your own labeled dataset:
+5. Finetune on your own labeled dataset:
 
 ```bash
 opf train /path/to/train.jsonl --output-dir /path/to/finetuned_checkpoint
