@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import html
+import io
 import json
+import re
 import sys
 import threading
 import time
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +30,47 @@ DEVICES = ("cpu", "cuda")
 OUTPUT_MODES = ("typed", "redacted")
 EVAL_MODES = ("typed", "untyped")
 DECODE_MODES = ("viterbi", "argmax")
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+TEXT_FILE_EXTENSIONS = {
+    ".txt",
+    ".text",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".log",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".sh",
+    ".zsh",
+    ".bash",
+    ".sql",
+}
+SUPPORTED_FILE_EXTENSIONS = TEXT_FILE_EXTENSIONS | {".docx", ".odt", ".pdf", ".rtf"}
+UPLOAD_ACCEPT = ",".join(sorted(SUPPORTED_FILE_EXTENSIONS))
+XML_TEXT_NAMESPACES = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+}
 
 _redactor_lock = threading.Lock()
 _redactors: dict[tuple[str, str, str], Any] = {}
@@ -119,6 +166,147 @@ def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     return result_payload
+
+
+def _decode_text_bytes(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _normalize_extracted_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _extract_docx_text(data: bytes) -> str:
+    xml_paths = (
+        "word/document.xml",
+        "word/header1.xml",
+        "word/header2.xml",
+        "word/header3.xml",
+        "word/footer1.xml",
+        "word/footer2.xml",
+        "word/footer3.xml",
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+    )
+    parts: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for path in xml_paths:
+            if path not in archive.namelist():
+                continue
+            root = ElementTree.fromstring(archive.read(path))
+            for paragraph in root.findall(".//w:p", XML_TEXT_NAMESPACES):
+                chunks: list[str] = []
+                for node in paragraph.iter():
+                    if node.tag == f"{{{XML_TEXT_NAMESPACES['w']}}}t" and node.text:
+                        chunks.append(node.text)
+                    elif node.tag == f"{{{XML_TEXT_NAMESPACES['w']}}}tab":
+                        chunks.append("\t")
+                    elif node.tag == f"{{{XML_TEXT_NAMESPACES['w']}}}br":
+                        chunks.append("\n")
+                text = "".join(chunks).strip()
+                if text:
+                    parts.append(text)
+    return "\n".join(parts)
+
+
+def _extract_odt_text(data: bytes) -> str:
+    parts: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        root = ElementTree.fromstring(archive.read("content.xml"))
+        for node in root.findall(".//text:h", XML_TEXT_NAMESPACES) + root.findall(
+            ".//text:p", XML_TEXT_NAMESPACES
+        ):
+            text = "".join(node.itertext()).strip()
+            if text:
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise ValueError(
+            "PDF upload support requires pypdf. Install the package with "
+            "`pip install -e .` so demo dependencies are available."
+        ) from exc
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+        return "\n\n".join(page for page in pages if page)
+    except Exception as exc:
+        raise ValueError("could not extract readable text from the PDF") from exc
+
+
+def _extract_rtf_text(data: bytes) -> str:
+    text = _decode_text_bytes(data)
+    text = re.sub(r"\\'[0-9a-fA-F]{2}", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+\d* ?", " ", text)
+    text = re.sub(r"[{}]", "", text)
+    return html.unescape(text)
+
+
+def _extract_upload_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    filename = payload.get("filename")
+    encoded = payload.get("content_base64")
+    content_type = payload.get("content_type")
+    if not isinstance(filename, str) or not filename.strip():
+        raise ValueError("filename must be a non-empty string")
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError("content_base64 must be a non-empty base64 string")
+    if content_type is not None and not isinstance(content_type, str):
+        raise ValueError("content_type must be a string")
+
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("content_base64 is not valid base64") from exc
+
+    if len(data) > MAX_UPLOAD_BYTES:
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise ValueError(f"file is too large; upload a file up to {limit_mb} MB")
+
+    extension = Path(filename).suffix.lower()
+    mime = (content_type or "").lower()
+    try:
+        if extension in TEXT_FILE_EXTENSIONS or mime.startswith("text/"):
+            text = _decode_text_bytes(data)
+        elif extension == ".docx":
+            text = _extract_docx_text(data)
+        elif extension == ".odt":
+            text = _extract_odt_text(data)
+        elif extension == ".pdf":
+            text = _extract_pdf_text(data)
+        elif extension == ".rtf":
+            text = _extract_rtf_text(data)
+        else:
+            supported = ", ".join(sorted(SUPPORTED_FILE_EXTENSIONS))
+            raise ValueError(
+                f"unsupported file type {extension or '(none)'}; use {supported}"
+            )
+    except ValueError:
+        raise
+    except (ElementTree.ParseError, KeyError, OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"could not read {extension or 'uploaded'} file") from exc
+
+    text = _normalize_extracted_text(text)
+    if not text:
+        raise ValueError("no readable text was extracted from the uploaded file")
+
+    return {
+        "filename": filename,
+        "content_type": content_type or "application/octet-stream",
+        "size_bytes": len(data),
+        "text": text,
+    }
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: object) -> None:
@@ -255,6 +443,16 @@ def _page() -> str:
       gap: 12px;
       margin-top: 14px;
     }}
+    .file-upload {{
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.45);
+    }}
+    .file-upload p {{ margin-bottom: 0; font-size: 13px; }}
     .examples {{
       display: grid;
       gap: 10px;
@@ -331,7 +529,7 @@ def _page() -> str:
     <header>
       <div>
         <h1>OPF Local Demo</h1>
-        <p>Test Privacy Filter redaction locally with free text or bundled synthetic examples.</p>
+        <p>Test Privacy Filter redaction locally with free text, uploaded documents, or bundled synthetic examples.</p>
       </div>
       <div class="muted">Serving from <code>{html.escape(str(ROOT))}</code></div>
     </header>
@@ -341,6 +539,12 @@ def _page() -> str:
         <h2>Input</h2>
         <label for="input-text">Free text</label>
         <textarea id="input-text" spellcheck="false">Alice was born on 1990-01-02 and can be reached at alice@example.com.</textarea>
+
+        <div class="file-upload">
+          <label for="file-input">Upload document</label>
+          <input id="file-input" type="file" accept="{UPLOAD_ACCEPT}">
+          <p class="muted">Supports text, Markdown, CSV/JSON, source files, PDF, Word .docx, OpenDocument .odt, and RTF up to 15 MB.</p>
+        </div>
 
         <div class="controls">
           <div>
@@ -405,6 +609,7 @@ def _page() -> str:
   <script>
     const state = {{ samples: [] }};
     const inputText = document.getElementById("input-text");
+    const fileInput = document.getElementById("file-input");
     const device = document.getElementById("device");
     const outputMode = document.getElementById("output-mode");
     const evalMode = document.getElementById("eval-mode");
@@ -457,6 +662,54 @@ def _page() -> str:
           inputText.focus();
         }});
         examplesEl.appendChild(button);
+      }}
+    }}
+
+    function readFileAsBase64(file) {{
+      return new Promise((resolve, reject) => {{
+        const reader = new FileReader();
+        reader.addEventListener("load", () => {{
+          const result = String(reader.result || "");
+          resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+        }});
+        reader.addEventListener("error", () => reject(reader.error || new Error("Could not read file.")));
+        reader.readAsDataURL(file);
+      }});
+    }}
+
+    async function uploadFile(file) {{
+      if (!file) return;
+      if (file.size > {MAX_UPLOAD_BYTES}) {{
+        setStatus("File is too large. Upload a file up to 15 MB.", "error");
+        fileInput.value = "";
+        return;
+      }}
+
+      setStatus(`Extracting text from ${{file.name}}...`);
+      fileInput.disabled = true;
+      try {{
+        const contentBase64 = await readFileAsBase64(file);
+        const response = await fetch("/api/extract-file", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            filename: file.name,
+            content_type: file.type,
+            content_base64: contentBase64
+          }})
+        }});
+        const data = await response.json();
+        if (!response.ok) {{
+          throw new Error(data.error || "File extraction failed.");
+        }}
+        inputText.value = data.text;
+        inputText.focus();
+        setStatus(`Loaded ${{data.filename}} (${{data.text.length.toLocaleString()}} characters).`, "ok");
+      }} catch (error) {{
+        setStatus(error.message || String(error), "error");
+      }} finally {{
+        fileInput.disabled = false;
+        fileInput.value = "";
       }}
     }}
 
@@ -526,6 +779,7 @@ def _page() -> str:
     for (const element of [outputMode, evalMode]) {{
       element.addEventListener("change", updateModeNote);
     }}
+    fileInput.addEventListener("change", () => uploadFile(fileInput.files && fileInput.files[0]));
     runButton.addEventListener("click", runRedaction);
     updateModeNote();
     loadOptions().catch((error) => setStatus(error.message || String(error), "error"));
@@ -575,7 +829,7 @@ class DemoHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/redact":
+        if path not in {"/api/redact", "/api/extract-file"}:
             _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
 
@@ -585,7 +839,10 @@ class DemoHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
             if not isinstance(payload, dict):
                 raise ValueError("request body must be a JSON object")
-            result = _redact_payload(payload)
+            if path == "/api/extract-file":
+                result = _extract_upload_payload(payload)
+            else:
+                result = _redact_payload(payload)
         except ValueError as exc:
             _json_response(self, HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return

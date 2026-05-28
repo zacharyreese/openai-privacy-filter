@@ -1,0 +1,5 @@
+record_type,name,email,phone,date,address,private_reference,reference_value,notes
+medical,Maribel Rowan,maribel.rowan@example.test,555-0138,1987-04-16,"1428 Cedar Lark Lane, Exampleville, ST 00000",SYN-MED-4829-ALPHA,SAMPLE-BP-118-76,"Synthetic patient intake row. The nurse logged SAMPLE-BP-118-76 from the cuff calibration sticker."
+legal,Theo Linden,theo.linden@example.test,555-0166,2026-06-18,"77 Mockingbird Terrace, Sampleton, ST 00000",SYN-LEGAL-2026-0042,No. 00-CV-0000,"Synthetic legal matter row. The drafting template included No. 00-CV-0000 in the header."
+personal,Nia Park,nia.park@example.test,555-0124,1995-12-05,"400 Example Orchard Way, Unit 8, Demo City, ST 00000",SYN-CUST-5501,sk-example-demo-token,"Synthetic personal profile row. The onboarding guide displayed sk-example-demo-token in a screenshot."
+operations,North Harbor Books Inc.,support@example.test,555-0100,2026-02-01,"900 Paper Mill Road, Fiction City, ST 00000",PUBLIC-ENTITY-000,ENTITY-000-EXAMPLE,"Synthetic company row. The records system displayed ENTITY-000-EXAMPLE in the import template."

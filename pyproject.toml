@@ -12,6 +12,7 @@ dependencies = [
   "huggingface_hub",
   "numpy",
   "packaging",
+  "pypdf",
   "torch",
   "safetensors",
   "tiktoken",

@@ -1,0 +1,37 @@
+{
+  "fixture_notice": "Fully synthetic data for Privacy Filter demo testing only.",
+  "person": {
+    "full_name": "Theo Linden",
+    "preferred_name": "Theo",
+    "date_of_birth": "1992-09-23",
+    "email": "theo.linden@example.test",
+    "phone": "555-0166",
+    "mailing_address": {
+      "line1": "77 Mockingbird Terrace",
+      "line2": "Unit 12",
+      "city": "Sampleton",
+      "state": "ST",
+      "postal_code": "00000"
+    }
+  },
+  "accounts": {
+    "demo_customer_id": "SYN-CUST-5501",
+    "support_pin": "135790",
+    "preferred_clinic": "North Harbor Teaching Clinic",
+    "legal_contact": "Attorney Lena Vale"
+  },
+  "reference_values": {
+    "product_serial": "SN-0000-EXAMPLE-2026",
+    "sample_id": "SAMPLE-ALPHA-00042",
+    "software_version": "v1.2.3",
+    "training_guide_token": "sk-example-demo-token",
+    "documentation_ip": "192.0.2.44",
+    "documentation_domain": "privacy-filter-demo.example.test",
+    "case_style": "Rowan v. North Harbor Books, Inc."
+  },
+  "notes": [
+    "Theo Linden asked that appointment reminders go to theo.linden@example.test.",
+    "The lab packet included SAMPLE-ALPHA-00042 on the front cover.",
+    "The onboarding guide displayed sk-example-demo-token in a screenshot."
+  ]
+}

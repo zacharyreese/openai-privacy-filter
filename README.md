@@ -84,13 +84,13 @@ Consult `opf train --help` for more flags and information about the finetuning m
 
 ### Local Frontend Demo
 
-You can also run a dependency-free local browser demo for quick model testing:
+You can also run a local browser demo for quick model testing:
 
 ```bash
 python3 examples/demo_frontend.py
 ```
 
-Then open `http://127.0.0.1:7860`. The demo includes a free-text input, bundled synthetic example inputs, `cpu`/`cuda` device selection, `typed`/`redacted` output modes, and `typed`/`untyped` eval-mode guidance. Install the package first with `pip install -e .` if you have not already done so.
+Then open `http://127.0.0.1:7860`. The demo includes a free-text input, document upload for common text/PDF/Word/Markdown formats, bundled synthetic example inputs, `cpu`/`cuda` device selection, `typed`/`redacted` output modes, and `typed`/`untyped` eval-mode guidance. Install the package first with `pip install -e .` if you have not already done so.
 
 ### Structure
 
